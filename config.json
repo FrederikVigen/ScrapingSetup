@@ -1,0 +1,73 @@
+{
+    "s3_bucket": "database-parquet-files-ve",
+    "s3_region": "eu-central-1",
+    "retention_days": 7,
+    "scrapers": [
+        {
+            "name": "ENTSOEImb15MinAT",
+            "workers": 1,
+            "task_generator_delay_ms": 200,
+            "url": "https://web-api.tp.entsoe.eu/api",
+            "token": "e463828a-e195-450c-b9aa-3245f5bf9965",
+            "sub_data_folder": "entsoe/imbalance/AT/15min"
+        },
+        {
+            "name": "apg_imb_15min",
+            "workers": 1,
+            "task_generator_delay_ms": 200,
+            "url": "https://transparency.apg.at/api/v1",
+            "drz_mode": "OperationalOrSettlement",
+            "value_column": "DRZ15M",
+            "sub_data_folder": "apg/imbalance/PT15M"
+        },
+        {
+            "name": "apg_imb_5min",
+            "workers": 1,
+            "task_generator_delay_ms": 200,
+            "url": "https://transparency.apg.at/api/v1",
+            "drz_mode": "CurrentBalancingState5M",
+            "value_column": "DRZ5M",
+            "sub_data_folder": "apg/imbalance/PT5M"
+        },
+        {
+            "name": "de_to_at",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "value_column": "OfferedCapacityDEtoAT",
+            "sub_data_folder": "apg/atc/de_to_at"
+        },
+        {
+            "name": "at_to_de",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "value_column": "OfferedCapacityATtoDE",
+            "sub_data_folder": "apg/atc/at_to_de"
+        },
+        {
+            "name": "cz_to_at",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "value_column": "OfferedCapacityCZtoAT",
+            "sub_data_folder": "apg/atc/cz_to_at"
+        },
+        {
+            "name": "at_to_cz",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "value_column": "OfferedCapacityATtoCZ",
+            "sub_data_folder": "apg/atc/at_to_cz"
+        },
+        {
+            "name": "apg_imb_price_15min",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "value_column": "AEPrice",
+            "sub_data_folder": "apg/imbalance/price/15min"
+        }
+    ]
+}
