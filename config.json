@@ -6,7 +6,7 @@
         {
             "name": "ENTSOEImb15MinAT",
             "workers": 1,
-            "task_generator_delay_ms": 200,
+            "task_generator_delay_ms": 2000,
             "url": "https://web-api.tp.entsoe.eu/api",
             "token": "e463828a-e195-450c-b9aa-3245f5bf9965",
             "sub_data_folder": "entsoe/imbalance/AT/15min"
