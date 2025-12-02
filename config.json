@@ -68,6 +68,13 @@
             "url": "https://transparency.apg.at/api/v1",
             "value_column": "AEPrice",
             "sub_data_folder": "apg/imbalance/price/15min"
+        },
+        {
+            "name": "balancing_energy_bids",
+            "workers": 1,
+            "task_generator_delay_ms": 1000,
+            "url": "https://transparency.apg.at/api/v1",
+            "sub_data_folder": "balancing/bids"
         }
     ]
 }

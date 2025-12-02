@@ -8,11 +8,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use arrow::array::{Float64Array, TimestampMicrosecondArray, Array};
+use arrow::array::{Float64Array, TimestampMicrosecondArray, Array, Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
+use ve_energy_scrapers::models::scraper_data::{ScraperData, ScraperPayload, Bid};
 
 pub struct Storage {
     base_path: String,
@@ -27,30 +28,78 @@ impl Storage {
         }
     }
 
-    pub async fn save_if_new(&self, name: &str, subfolder: Option<&str>, data: &[(DateTime<Utc>, DateTime<Utc>, f64)]) -> Result<bool> {
+    pub async fn save_if_new(&self, name: &str, subfolder: Option<&str>, data: &[ScraperData]) -> Result<bool> {
         let mut saved_any = false;
-        let mut groups: HashMap<(i32, u32, u32), Vec<(DateTime<Utc>, DateTime<Utc>, f64)>> = HashMap::new();
+        
+        // Separate data by type
+        let mut values_data: Vec<(DateTime<Utc>, DateTime<Utc>, f64)> = Vec::new();
+        let mut bids_data: Vec<(DateTime<Utc>, DateTime<Utc>, Bid)> = Vec::new();
 
-        for (start, end, value) in data {
-            let start_cet = start.with_timezone(&Vienna);
-            let year = start_cet.year();
-            let month = start_cet.month();
-            let day = start_cet.day();
-            groups.entry((year, month, day)).or_default().push((*start, *end, *value));
+        for item in data {
+            match &item.payload {
+                ScraperPayload::Values(map) => {
+                    for value in map.values() {
+                        values_data.push((item.delivery_from, item.delivery_to, *value));
+                    }
+                }
+                ScraperPayload::Bids(bids) => {
+                    for bid in bids {
+                        bids_data.push((item.delivery_from, item.delivery_to, bid.clone()));
+                    }
+                }
+            }
         }
 
-        for ((year, month, day), group_data) in groups {
-            let folder_path = if let Some(sub) = subfolder {
-                format!("{}/{}", self.base_path, sub)
-            } else {
-                format!("{}/{}", self.base_path, name)
-            };
+        if !values_data.is_empty() {
+            let mut groups: HashMap<(i32, u32, u32), Vec<(DateTime<Utc>, DateTime<Utc>, f64)>> = HashMap::new();
+            for (start, end, value) in values_data {
+                let start_cet = start.with_timezone(&Vienna);
+                let year = start_cet.year();
+                let month = start_cet.month();
+                let day = start_cet.day();
+                groups.entry((year, month, day)).or_default().push((start, end, value));
+            }
 
-            let file_path = format!("{}/year={}/month={:02}/day={:02}/data.parquet", folder_path, year, month, day);
-            if self.process_partition(&file_path, &group_data)? {
-                saved_any = true;
-                if let Some(dirty) = &self.dirty_files {
-                    dirty.lock().await.insert(file_path);
+            for ((year, month, day), group_data) in groups {
+                let folder_path = if let Some(sub) = subfolder {
+                    format!("{}/{}", self.base_path, sub)
+                } else {
+                    format!("{}/{}", self.base_path, name)
+                };
+
+                let file_path = format!("{}/year={}/month={:02}/day={:02}/data.parquet", folder_path, year, month, day);
+                if self.process_values_partition(&file_path, &group_data)? {
+                    saved_any = true;
+                    if let Some(dirty) = &self.dirty_files {
+                        dirty.lock().await.insert(file_path);
+                    }
+                }
+            }
+        }
+
+        if !bids_data.is_empty() {
+             let mut groups: HashMap<(i32, u32, u32), Vec<(DateTime<Utc>, DateTime<Utc>, Bid)>> = HashMap::new();
+            for (start, end, bid) in bids_data {
+                let start_cet = start.with_timezone(&Vienna);
+                let year = start_cet.year();
+                let month = start_cet.month();
+                let day = start_cet.day();
+                groups.entry((year, month, day)).or_default().push((start, end, bid));
+            }
+
+            for ((year, month, day), group_data) in groups {
+                let folder_path = if let Some(sub) = subfolder {
+                    format!("{}/{}", self.base_path, sub)
+                } else {
+                    format!("{}/{}", self.base_path, name)
+                };
+
+                let file_path = format!("{}/year={}/month={:02}/day={:02}/data.parquet", folder_path, year, month, day);
+                if self.process_bids_partition(&file_path, &group_data)? {
+                    saved_any = true;
+                    if let Some(dirty) = &self.dirty_files {
+                        dirty.lock().await.insert(file_path);
+                    }
                 }
             }
         }
@@ -113,7 +162,7 @@ impl Storage {
             .and_then(|s| s.parse().ok())
     }
 
-    fn process_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, f64)]) -> Result<bool> {
+    fn process_values_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, f64)]) -> Result<bool> {
         let path = Path::new(file_path);
 
         // Create directory if it doesn't exist
@@ -217,6 +266,149 @@ impl Storage {
                 Arc::new(start_array),
                 Arc::new(end_array),
                 Arc::new(value_array),
+                Arc::new(scraped_at_array),
+            ],
+        )?;
+
+        // Write everything back to a temp file first for atomic updates
+        let tmp_path = format!("{}.tmp", file_path);
+        let file = File::create(&tmp_path)?;
+        let mut writer = ArrowWriter::try_new(file, schema.clone(), None)?;
+
+        for batch in existing_batches {
+            writer.write(&batch)?;
+        }
+        writer.write(&new_batch)?;
+
+        writer.close()?;
+        
+        // Atomic rename
+        std::fs::rename(&tmp_path, path)?;
+        
+        Ok(true)
+    }
+
+    fn process_bids_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, Bid)]) -> Result<bool> {
+        let path = Path::new(file_path);
+
+        // Create directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut latest_values: HashMap<(i64, i64, String, i32), (Option<f64>, Option<f64>)> = HashMap::new();
+        let mut existing_batches = Vec::new();
+        
+        // Define the target schema
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("start", DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())), false),
+            Field::new("end", DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())), false),
+            Field::new("product", DataType::Utf8, false),
+            Field::new("rank", DataType::Int32, false),
+            Field::new("price", DataType::Float64, true),
+            Field::new("volume", DataType::Float64, true),
+            Field::new("scraped_at", DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())), true),
+        ]));
+
+        if path.exists() {
+            let file = File::open(path)?;
+            let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+            let mut reader = builder.build()?;
+            
+            while let Some(batch) = reader.next() {
+                let batch = batch?;
+                
+                // Extract data for deduplication
+                let start_col = batch.column(0).as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
+                let end_col = batch.column(1).as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
+                let product_col = batch.column(2).as_any().downcast_ref::<StringArray>().unwrap();
+                let rank_col = batch.column(3).as_any().downcast_ref::<Int32Array>().unwrap();
+                let price_col = batch.column(4).as_any().downcast_ref::<Float64Array>().unwrap();
+                let volume_col = batch.column(5).as_any().downcast_ref::<Float64Array>().unwrap();
+                
+                for i in 0..start_col.len() {
+                    let start = start_col.value(i);
+                    let end = end_col.value(i);
+                    let product = product_col.value(i).to_string();
+                    let rank = rank_col.value(i);
+                    let price = if price_col.is_null(i) { None } else { Some(price_col.value(i)) };
+                    let volume = if volume_col.is_null(i) { None } else { Some(volume_col.value(i)) };
+                    
+                    latest_values.insert((start, end, product, rank), (price, volume));
+                }
+                existing_batches.push(batch);
+            }
+        }
+
+        let mut new_starts = Vec::new();
+        let mut new_ends = Vec::new();
+        let mut new_products = Vec::new();
+        let mut new_ranks = Vec::new();
+        let mut new_prices = Vec::new();
+        let mut new_volumes = Vec::new();
+        let mut new_scraped_ats = Vec::new();
+        
+        let now_micros = Utc::now().timestamp_micros();
+
+        for (start, end, bid) in data {
+            let start_micros = start.timestamp_micros();
+            let end_micros = end.timestamp_micros();
+            let product = bid.product.clone();
+            let rank = bid.rank;
+            let price = bid.price;
+            let volume = bid.volume;
+            
+            let is_changed = match latest_values.get(&(start_micros, end_micros, product.clone(), rank)) {
+                Some((last_price, last_volume)) => {
+                    let price_changed = match (last_price, price) {
+                        (Some(lp), Some(p)) => (lp - p).abs() > f64::EPSILON,
+                        (None, None) => false,
+                        _ => true,
+                    };
+                    let volume_changed = match (last_volume, volume) {
+                        (Some(lv), Some(v)) => (lv - v).abs() > f64::EPSILON,
+                        (None, None) => false,
+                        _ => true,
+                    };
+                    price_changed || volume_changed
+                },
+                None => true,
+            };
+            
+            if is_changed {
+                new_starts.push(start_micros);
+                new_ends.push(end_micros);
+                new_products.push(product.clone());
+                new_ranks.push(rank);
+                new_prices.push(price);
+                new_volumes.push(volume);
+                new_scraped_ats.push(now_micros);
+                
+                latest_values.insert((start_micros, end_micros, product, rank), (price, volume));
+            }
+        }
+
+        if new_starts.is_empty() {
+            return Ok(false);
+        }
+
+        let start_array = TimestampMicrosecondArray::from(new_starts).with_timezone("UTC");
+        let end_array = TimestampMicrosecondArray::from(new_ends).with_timezone("UTC");
+        let product_array = StringArray::from(new_products);
+        let rank_array = Int32Array::from(new_ranks);
+        let price_array = Float64Array::from(new_prices);
+        let volume_array = Float64Array::from(new_volumes);
+        let scraped_at_array = TimestampMicrosecondArray::from(new_scraped_ats).with_timezone("UTC");
+
+        let new_batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(start_array),
+                Arc::new(end_array),
+                Arc::new(product_array),
+                Arc::new(rank_array),
+                Arc::new(price_array),
+                Arc::new(volume_array),
                 Arc::new(scraped_at_array),
             ],
         )?;
