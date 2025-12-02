@@ -74,7 +74,7 @@
             "workers": 1,
             "task_generator_delay_ms": 5000,
             "url": "https://transparency.apg.at/api/v1",
-            "sub_data_folder": "balancing/bids"
+            "sub_data_folder": "apg/balancing/bids"
         }
     ]
 }
