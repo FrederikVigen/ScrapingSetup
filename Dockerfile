@@ -1,5 +1,5 @@
-# Build stage - using Ubuntu 24.04 for glibc 2.39 compatibility
-FROM rust:1.83-bookworm AS builder
+# Build stage - using nightly for edition2024 support
+FROM rustlang/rust:nightly-bookworm AS builder
 
 WORKDIR /app
 
