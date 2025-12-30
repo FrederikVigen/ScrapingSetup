@@ -21,6 +21,9 @@ jobs:
       packages: write
     
     steps:
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME_LOWER=${IMAGE_NAME,,}" >> $GITHUB_ENV
+
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -47,7 +50,7 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:latest
           secrets: |
             GIT_AUTH_TOKEN=${{ steps.app-token.outputs.token }}
           cache-from: type=gha
