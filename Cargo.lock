@@ -1729,7 +1729,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3583,7 +3583,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 [[package]]
 name = "ve_energy_scrapers"
 version = "0.1.0"
-source = "git+https://github.com/VigenEnergy/ve_energy_scrapers#3a907b4fae8f21311929755ddd69d5f6dab4c67f"
+source = "git+https://github.com/VigenEnergy/ve_energy_scrapers#f291a1cc1e285bccbbcdcc1c0bd35552a5487e81"
 dependencies = [
  "anyhow",
  "async-trait",
