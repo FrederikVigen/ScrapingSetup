@@ -57,17 +57,15 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
+    name: Deploy to ETL server
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.event_name != 'pull_request'
 
     steps:
-      - name: Deploy to server
+      - name: Deploy to ETL server
         run: |
           curl -X POST http://188.245.158.73:9000/hooks/deploy \
             -H "X-Deploy-Token: ${{ secrets.DEPLOY_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"host": "10.0.1.10", "path": "/opt/etl", "service": "scrapingsetup"}'
-
-      - name: Deployment complete
-        run: echo "Deployment triggered successfully"
+            -d '{"host": "10.0.1.10", "path": "/opt/etl", "service": "scrapingsetup", "tag": "${{ github.sha }}", "image": "ghcr.io/vigenenergy/scrapingsetup"}'
