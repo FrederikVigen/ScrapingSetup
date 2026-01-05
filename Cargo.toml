@@ -3,6 +3,18 @@ name = "scraping_service"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "scraping_service"
+path = "src/main.rs"
+
+[[bin]]
+name = "backfill"
+path = "src/bin/backfill.rs"
+
+[[bin]]
+name = "verify-uploads"
+path = "src/bin/verify_uploads.rs"
+
 [dependencies]
 ve_energy_scrapers = { git = "https://github.com/VigenEnergy/ve_energy_scrapers" }
 anyhow = "1.0"
@@ -21,3 +33,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 dotenvy = "0.15"
+indicatif = "0.17"

@@ -29,6 +29,14 @@ impl Storage {
     }
 
     pub async fn save_if_new(&self, name: &str, subfolder: Option<&str>, data: &[ScraperData]) -> Result<bool> {
+        self.save_with_scraped_at(name, subfolder, data, true).await
+    }
+
+    pub async fn save_backfill(&self, name: &str, subfolder: Option<&str>, data: &[ScraperData]) -> Result<bool> {
+        self.save_with_scraped_at(name, subfolder, data, false).await
+    }
+
+    async fn save_with_scraped_at(&self, name: &str, subfolder: Option<&str>, data: &[ScraperData], set_scraped_at: bool) -> Result<bool> {
         let mut saved_any = false;
         
         // Separate data by type
@@ -66,7 +74,7 @@ impl Storage {
                 };
 
                 let file_path = format!("{}/year={}/month={:02}/day={:02}/data.parquet", folder_path, year, month, day);
-                if self.process_values_partition(&file_path, &group_data)? {
+                if self.process_values_partition(&file_path, &group_data, set_scraped_at)? {
                     saved_any = true;
                     if let Some(dirty) = &self.dirty_files {
                         dirty.lock().await.insert(file_path);
@@ -93,7 +101,7 @@ impl Storage {
                 };
 
                 let file_path = format!("{}/year={}/month={:02}/day={:02}/data.parquet", folder_path, year, month, day);
-                if self.process_bids_partition(&file_path, &group_data)? {
+                if self.process_bids_partition(&file_path, &group_data, set_scraped_at)? {
                     saved_any = true;
                     if let Some(dirty) = &self.dirty_files {
                         dirty.lock().await.insert(file_path);
@@ -160,7 +168,7 @@ impl Storage {
             .and_then(|s| s.parse().ok())
     }
 
-    fn process_values_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, HashMap<String, f64>)]) -> Result<bool> {
+    fn process_values_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, HashMap<String, f64>)], set_scraped_at: bool) -> Result<bool> {
         let path = Path::new(file_path);
 
         // Create directory if it doesn't exist
@@ -215,7 +223,11 @@ impl Storage {
             }
         }
 
-        let now_micros = Utc::now().timestamp_micros();
+        let now_micros = if set_scraped_at {
+            Utc::now().timestamp_micros()
+        } else {
+            0 // null for backfilled data
+        };
         let mut has_changes = false;
 
         for (start, end, new_values) in data {
@@ -319,7 +331,7 @@ impl Storage {
         Ok(true)
     }
 
-    fn process_bids_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, Bid)]) -> Result<bool> {
+    fn process_bids_partition(&self, file_path: &str, data: &[(DateTime<Utc>, DateTime<Utc>, Bid)], set_scraped_at: bool) -> Result<bool> {
         let path = Path::new(file_path);
 
         // Create directory if it doesn't exist
@@ -383,7 +395,11 @@ impl Storage {
         let mut new_volumes = Vec::new();
         let mut new_scraped_ats = Vec::new();
         
-        let now_micros = Utc::now().timestamp_micros();
+        let now_micros = if set_scraped_at {
+            Utc::now().timestamp_micros()
+        } else {
+            0 // null for backfilled data
+        };
 
         for (start, end, bid) in data {
             let start_micros = start.timestamp_micros();

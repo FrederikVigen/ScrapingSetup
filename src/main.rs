@@ -7,17 +7,10 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 use chrono::{Duration as ChronoDuration, Utc};
 
-mod config;
-mod storage;
-mod uploader;
-
+use scraping_service::{config, storage, uploader, scraper_factory};
 use config::{load_config, ScraperConfig};
 use storage::Storage;
 use uploader::Uploader;
-
-use ve_energy_scrapers::scraper::Scraper;
-use ve_energy_scrapers::apg_information_scraper::APGInformationScraper;
-use ve_energy_scrapers::entsoe_information_scraper::EntsoeInformationScraper;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -93,21 +86,9 @@ async fn start_scraper_pool(config: ScraperConfig, storage: Arc<Storage>) -> Res
     let name = config.scraper_config.name.clone();
     let workers = config.scraper_config.workers;
     let delay = config.scraper_config.task_generator_delay_ms as u64;
-    let strategy_config = config.scraper_config.clone();
     let subfolder = config.sub_data_folder.clone();
 
-    let scraper: Box<dyn Scraper> = if let Some(url) = config.scraper_config.values.get("url").and_then(|v| v.as_str()) {
-        if url.contains("entsoe") {
-            Box::new(EntsoeInformationScraper::new(strategy_config)?)
-        } else if url.contains("apg") {
-            Box::new(APGInformationScraper::new(strategy_config)?)
-        } else {
-            return Err(anyhow::anyhow!("Unknown scraper URL type: {}", url));
-        }
-    } else {
-        return Err(anyhow::anyhow!("Missing URL in config for {}", name));
-    };
-
+    let scraper = scraper_factory::create_scraper(&config.scraper_config)?;
     let scraper = Arc::new(scraper);
     
     // Create a channel for tasks. The buffer size can be adjusted.
